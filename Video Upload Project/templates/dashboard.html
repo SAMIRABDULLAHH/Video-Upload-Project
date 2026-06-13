@@ -1,0 +1,53 @@
+<!DOCTYPE html>
+<html lang="ar" dir="rtl">
+<head>
+    <meta charset="UTF-8">
+    <title>لوحة تحكم الإدارة</title>
+    <script src="https://cdn.jsdelivr.net/npm/@tailwindcss/browser@4"></script>
+</head>
+<body class="bg-slate-900 text-white font-sans p-4 md:p-8">
+    <div class="max-w-5xl mx-auto">
+        <div class="flex flex-col md:flex-row justify-between items-center mb-8 border-b border-slate-700 pb-4 gap-4">
+            <div>
+                <h1 class="text-3xl font-bold text-indigo-400">لوحة تحكم النظام الكاملة</h1>
+            </div>
+            <div class="flex gap-3">
+                <a href="/search" class="bg-slate-800 hover:bg-slate-700 text-white px-4 py-2 rounded-xl text-sm font-semibold border border-slate-700 transition">شاشة البحث</a>
+                <a href="/" target="_blank" class="bg-indigo-600 hover:bg-indigo-700 text-white px-4 py-2 rounded-xl text-sm font-semibold transition">فتح صفحة الرفع</a>
+            </div>
+        </div>
+        <div class="bg-slate-800 rounded-2xl border border-slate-700 overflow-hidden shadow-2xl">
+            <table class="w-full text-right border-collapse">
+                <thead class="bg-slate-700 text-slate-300 text-sm">
+                    <tr>
+                        <th class="p-4">رقم المقطع (ID)</th>
+                        <th class="p-4">اسم الملف</th>
+                        <th class="p-4">تاريخ الرفع</th>
+                        <th class="p-4 text-center">الإجراءات</th>
+                    </tr>
+                </thead>
+                <tbody class="divide-y divide-slate-700">
+                    {% for video in videos %}
+                    <tr class="hover:bg-slate-750/50 transition">
+                        <td class="p-4 font-mono font-bold text-indigo-400 text-lg">{{ video.id }}</td>
+                        <td class="p-4 text-slate-200 max-w-xs truncate">{{ video.filename }}</td>
+                        <td class="p-4 text-sm text-slate-400">{{ video.date }}</td>
+                        <td class="p-4 text-center">
+                            <div class="flex items-center justify-center gap-2">
+                                <form action="/search" method="post" class="inline">
+                                    <input type="hidden" name="video_id" value="{{ video.id }}">
+                                    <button type="submit" class="bg-indigo-600/20 text-indigo-400 px-3 py-1.5 rounded-lg text-xs font-bold transition">تشغيل</button>
+                                </form>
+                                <form action="/dashboard/delete/{{ video.id }}" method="post" class="inline">
+                                    <button type="submit" class="bg-red-600/20 text-red-400 px-3 py-1.5 rounded-lg text-xs font-bold transition">حذف</button>
+                                </form>
+                            </div>
+                        </td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+    </div>
+</body>
+</html>
