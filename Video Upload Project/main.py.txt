@@ -9,31 +9,141 @@ from fastapi.templating import Jinja2Templates
 
 app = FastAPI()
 
-# تحديد المسار الأساسي للمشروع بشكل ديناميكي لحل مشكلة Render
-BASE_DIR = os.path.dirname(os.path.abspath(__file__))
-UPLOAD_DIR = os.path.join(BASE_DIR, "storage")
+# إعداد المجلدات تلقائياً في السيرفر
+UPLOAD_DIR = "storage"
 os.makedirs(UPLOAD_DIR, exist_ok=True)
-
-# ربط مجلد الـ templates بالمسار الكامل الصحيح
-TEMPLATES_DIR = os.path.join(BASE_DIR, "templates")
-templates = Jinja2Templates(directory=TEMPLATES_DIR)
+os.makedirs("templates", exist_ok=True)
 
 ADMIN_PASSWORD = "AbuAmerPass2026"
 RETENTION_DAYS = 7 
 
-# تحديد مسار قاعدة البيانات بشكل صحيح
-DB_PATH = os.path.join(BASE_DIR, "database.db")
+# --- نصوص واجهات الـ HTML مدمجة داخلياً لحل مشكلة المسارات في Render ---
+UPLOAD_HTML = """<!DOCTYPE html>
+<html lang="ar" dir="rtl">
+<head>
+    <meta charset="UTF-8">
+    <title>مركز رفع المقاطع الآمن</title>
+    <script src="https://cdn.jsdelivr.net/npm/@tailwindcss/browser@4"></script>
+</head>
+<body class="bg-slate-900 text-white font-sans flex items-center justify-center min-h-screen p-4">
+    <div class="bg-slate-800 p-8 rounded-2xl shadow-xl w-full max-w-md text-center border border-slate-700">
+        <h1 class="text-2xl font-bold mb-2 text-indigo-400">منصة رفع المقاطع الخاص</h1>
+        <p class="text-slate-400 text-sm mb-6">ارفع المقطع واحصل على رقم المعاينة فوراً</p>
+        <form action="/upload" method="post" enctype="multipart/form-data" class="space-y-4">
+            <div class="border-2 border-dashed border-slate-600 rounded-xl p-6 hover:border-indigo-500 cursor-pointer transition bg-slate-850">
+                <input type="file" name="file" accept="video/*" required class="block w-full text-sm text-slate-400 file:ml-4 file:py-2 file:px-4 file:rounded-full file:border-0 file:text-sm file:font-semibold file:bg-indigo-600 file:text-white hover:file:bg-indigo-700">
+            </div>
+            <button type="submit" class="w-full bg-indigo-600 hover:bg-indigo-700 text-white font-bold py-3 rounded-xl transition shadow-lg">رفع المقطع الآن</button>
+        </form>
+        {% if video_id %}
+        <div class="mt-6 p-4 bg-emerald-950/80 border border-emerald-500/50 rounded-xl">
+            <p class="text-sm text-emerald-400 font-semibold">تم الرفع بنجاح! رقم المقطع هو:</p>
+            <p class="text-3xl font-mono font-bold tracking-wider text-white mt-2 bg-slate-900/50 py-2 rounded-lg border border-slate-700">{{ video_id }}</p>
+        </div>
+        {% endif %}
+    </div>
+</body>
+</html>"""
+
+SEARCH_HTML = """<!DOCTYPE html>
+<html lang="ar" dir="rtl">
+<head>
+    <meta charset="UTF-8">
+    <title>البحث عن المقاطع - الإدارة</title>
+    <script src="https://cdn.jsdelivr.net/npm/@tailwindcss/browser@4"></script>
+</head>
+<body class="bg-slate-900 text-white font-sans flex items-center justify-center min-h-screen p-4">
+    <div class="bg-slate-800 p-8 rounded-2xl shadow-xl w-full max-w-2xl border border-slate-700">
+        <div class="flex justify-between items-center mb-6">
+            <h1 class="text-2xl font-bold text-indigo-400">نظام استعراض المقاطع الخاص</h1>
+            <a href="/dashboard" class="text-sm text-indigo-400 hover:underline">لوحة التحكم ←</a>
+        </div>
+        <form action="/search" method="post" class="flex gap-2 mb-6">
+            <input type="text" name="video_id" placeholder="أدخل رقم المقطع (ID)..." required class="flex-1 bg-slate-700 border border-slate-600 rounded-xl px-4 py-3 text-white text-center font-mono text-lg tracking-wider">
+            <button type="submit" class="bg-indigo-600 hover:bg-indigo-700 px-6 py-3 rounded-xl font-bold transition">بحث</button>
+        </form>
+        {% if error %}
+            <div class="p-4 bg-red-950/50 border border-red-500/40 rounded-xl text-red-400 text-center font-semibold mb-4">{{ error }}</div>
+        {% endif %}
+        {% if video_path %}
+            <div class="mt-4 border border-slate-700 rounded-xl p-4 bg-slate-850">
+                <p class="text-sm text-slate-400 mb-3 text-center">معاينة المقطع رقم: <span class="font-mono text-indigo-400 font-bold text-lg">{{ video_id }}</span></p>
+                <video controls class="w-full rounded-xl border border-slate-600 shadow-2xl bg-black">
+                    <source src="{{ video_path }}" type="video/mp4">
+                </video>
+            </div>
+        {% endif %}
+    </div>
+</body>
+</html>"""
+
+DASHBOARD_HTML = """<!DOCTYPE html>
+<html lang="ar" dir="rtl">
+<head>
+    <meta charset="UTF-8">
+    <title>لوحة تحكم الإدارة</title>
+    <script src="https://cdn.jsdelivr.net/npm/@tailwindcss/browser@4"></script>
+</head>
+<body class="bg-slate-900 text-white font-sans p-4 md:p-8">
+    <div class="max-w-5xl mx-auto">
+        <div class="flex flex-col md:flex-row justify-between items-center mb-8 border-b border-slate-700 pb-4 gap-4">
+            <div>
+                <h1 class="text-3xl font-bold text-indigo-400">لوحة تحكم النظام الكاملة</h1>
+            </div>
+            <div class="flex gap-3">
+                <a href="/search" class="bg-slate-800 hover:bg-slate-700 text-white px-4 py-2 rounded-xl text-sm font-semibold border border-slate-700 transition">شاشة البحث</a>
+                <a href="/" target="_blank" class="bg-indigo-600 hover:bg-indigo-700 text-white px-4 py-2 rounded-xl text-sm font-semibold transition">فتح صفحة الرفع</a>
+            </div>
+        </div>
+        <div class="bg-slate-800 rounded-2xl border border-slate-700 overflow-hidden shadow-2xl">
+            <table class="w-full text-right border-collapse">
+                <thead class="bg-slate-700 text-slate-300 text-sm">
+                    <tr>
+                        <th class="p-4">رقم المقطع (ID)</th>
+                        <th class="p-4">اسم الملف</th>
+                        <th class="p-4">تاريخ الرفع</th>
+                        <th class="p-4 text-center">الإجراءات</th>
+                    </tr>
+                </thead>
+                <tbody class="divide-y divide-slate-700">
+                    {% for video in videos %}
+                    <tr class="hover:bg-slate-750/50 transition">
+                        <td class="p-4 font-mono font-bold text-indigo-400 text-lg">{{ video.id }}</td>
+                        <td class="p-4 text-slate-200 max-w-xs truncate">{{ video.filename }}</td>
+                        <td class="p-4 text-sm text-slate-400">{{ video.date }}</td>
+                        <td class="p-4 text-center">
+                            <div class="flex items-center justify-center gap-2">
+                                <form action="/search" method="post" class="inline">
+                                    <input type="hidden" name="video_id" value="{{ video.id }}">
+                                    <button type="submit" class="bg-indigo-600/20 text-indigo-400 px-3 py-1.5 rounded-lg text-xs font-bold transition">تشغيل</button>
+                                </form>
+                                <form action="/dashboard/delete/{{ video.id }}" method="post" class="inline">
+                                    <button type="submit" class="bg-red-600/20 text-red-400 px-3 py-1.5 rounded-lg text-xs font-bold transition">حذف</button>
+                                </form>
+                            </div>
+                        </td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+    </div>
+</body>
+</html>"""
+
+# كتابة الواجهات تلقائياً داخل السيرفر فور تشغيله
+with open("templates/upload.html", "w", encoding="utf-8") as f: f.write(UPLOAD_HTML)
+with open("templates/search.html", "w", encoding="utf-8") as f: f.write(SEARCH_HTML)
+with open("templates/dashboard.html", "w", encoding="utf-8") as f: f.write(DASHBOARD_HTML)
+
+templates = Jinja2Templates(directory="templates")
 
 def init_db():
-    conn = sqlite3.connect(DB_PATH)
+    conn = sqlite3.connect("database.db")
     cursor = conn.cursor()
     cursor.execute("""
         CREATE TABLE IF NOT EXISTS videos (
-            id TEXT PRIMARY KEY,
-            filename TEXT,
-            filepath TEXT,
-            upload_date TEXT,
-            is_active INTEGER DEFAULT 1
+            id TEXT PRIMARY KEY, filename TEXT, filepath TEXT, upload_date TEXT, is_active INTEGER DEFAULT 1
         )
     """)
     conn.commit()
@@ -42,7 +152,7 @@ def init_db():
 init_db()
 
 def clean_expired_videos():
-    conn = sqlite3.connect(DB_PATH)
+    conn = sqlite3.connect("database.db")
     cursor = conn.cursor()
     time_limit = (datetime.now() - timedelta(days=RETENTION_DAYS)).strftime("%Y-%m-%d %H:%M:%S")
     cursor.execute("SELECT id, filepath FROM videos WHERE upload_date < ?", (time_limit,))
@@ -63,11 +173,10 @@ async def handle_upload(request: Request, file: UploadFile = File(...)):
     clean_expired_videos()
     video_id = str(secrets.randbelow(900000) + 100000)
     file_extension = os.path.splitext(file.filename)[1]
-    saved_filename = f"{video_id}{file_extension}"
-    filepath = os.path.join(UPLOAD_DIR, saved_filename)
+    filepath = os.path.join(UPLOAD_DIR, f"{video_id}{file_extension}")
     with open(filepath, "wb") as buffer:
         shutil.copyfileobj(file.file, buffer)
-    conn = sqlite3.connect(DB_PATH)
+    conn = sqlite3.connect("database.db")
     cursor = conn.cursor()
     cursor.execute("INSERT INTO videos (id, filename, filepath, upload_date) VALUES (?, ?, ?, ?)",
                    (video_id, file.filename, filepath, datetime.now().strftime("%Y-%m-%d %H:%M:%S")))
@@ -81,7 +190,7 @@ async def search_page(request: Request):
 
 @app.post("/search")
 async def search_video(request: Request, video_id: str = Form(...)):
-    conn = sqlite3.connect(DB_PATH)
+    conn = sqlite3.connect("database.db")
     cursor = conn.cursor()
     cursor.execute("SELECT id, filepath FROM videos WHERE id = ? AND is_active = 1", (video_id.strip(),))
     video = cursor.fetchone()
@@ -92,7 +201,7 @@ async def search_video(request: Request, video_id: str = Form(...)):
 
 @app.get("/stream/{video_id}")
 async def stream_video(video_id: str):
-    conn = sqlite3.connect(DB_PATH)
+    conn = sqlite3.connect("database.db")
     cursor = conn.cursor()
     cursor.execute("SELECT filepath FROM videos WHERE id = ?", (video_id,))
     video = cursor.fetchone()
@@ -104,7 +213,7 @@ async def stream_video(video_id: str):
 @app.get("/dashboard", response_class=HTMLResponse)
 async def dashboard_page(request: Request):
     clean_expired_videos()
-    conn = sqlite3.connect(DB_PATH)
+    conn = sqlite3.connect("database.db")
     cursor = conn.cursor()
     cursor.execute("SELECT id, filename, upload_date, is_active FROM videos ORDER BY upload_date DESC")
     videos = cursor.fetchall()
@@ -114,7 +223,7 @@ async def dashboard_page(request: Request):
 
 @app.post("/dashboard/delete/{video_id}")
 async def delete_video(video_id: str):
-    conn = sqlite3.connect(DB_PATH)
+    conn = sqlite3.connect("database.db")
     cursor = conn.cursor()
     cursor.execute("SELECT filepath FROM videos WHERE id = ?", (video_id,))
     video = cursor.fetchone()
