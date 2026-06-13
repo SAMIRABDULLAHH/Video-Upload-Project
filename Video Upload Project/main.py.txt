@@ -1,0 +1,127 @@
+import os
+import secrets
+import shutil
+import sqlite3
+from datetime import datetime, timedelta
+from fastapi import FastAPI, UploadFile, File, Form, Request, HTTPException, status
+from fastapi.responses import HTMLResponse, RedirectResponse, FileResponse
+from fastapi.templating import Jinja2Templates
+
+app = FastAPI()
+
+# تحديد المسار الأساسي للمشروع بشكل ديناميكي لحل مشكلة Render
+BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+UPLOAD_DIR = os.path.join(BASE_DIR, "storage")
+os.makedirs(UPLOAD_DIR, exist_ok=True)
+
+# ربط مجلد الـ templates بالمسار الكامل الصحيح
+TEMPLATES_DIR = os.path.join(BASE_DIR, "templates")
+templates = Jinja2Templates(directory=TEMPLATES_DIR)
+
+ADMIN_PASSWORD = "AbuAmerPass2026"
+RETENTION_DAYS = 7 
+
+# تحديد مسار قاعدة البيانات بشكل صحيح
+DB_PATH = os.path.join(BASE_DIR, "database.db")
+
+def init_db():
+    conn = sqlite3.connect(DB_PATH)
+    cursor = conn.cursor()
+    cursor.execute("""
+        CREATE TABLE IF NOT EXISTS videos (
+            id TEXT PRIMARY KEY,
+            filename TEXT,
+            filepath TEXT,
+            upload_date TEXT,
+            is_active INTEGER DEFAULT 1
+        )
+    """)
+    conn.commit()
+    conn.close()
+
+init_db()
+
+def clean_expired_videos():
+    conn = sqlite3.connect(DB_PATH)
+    cursor = conn.cursor()
+    time_limit = (datetime.now() - timedelta(days=RETENTION_DAYS)).strftime("%Y-%m-%d %H:%M:%S")
+    cursor.execute("SELECT id, filepath FROM videos WHERE upload_date < ?", (time_limit,))
+    expired_videos = cursor.fetchall()
+    for video_id, filepath in expired_videos:
+        if os.path.exists(filepath):
+            os.remove(filepath)
+        cursor.execute("DELETE FROM videos WHERE id = ?", (video_id,))
+    conn.commit()
+    conn.close()
+
+@app.get("/", response_class=HTMLResponse)
+async def upload_page(request: Request):
+    return templates.TemplateResponse("upload.html", {"request": request})
+
+@app.post("/upload")
+async def handle_upload(request: Request, file: UploadFile = File(...)):
+    clean_expired_videos()
+    video_id = str(secrets.randbelow(900000) + 100000)
+    file_extension = os.path.splitext(file.filename)[1]
+    saved_filename = f"{video_id}{file_extension}"
+    filepath = os.path.join(UPLOAD_DIR, saved_filename)
+    with open(filepath, "wb") as buffer:
+        shutil.copyfileobj(file.file, buffer)
+    conn = sqlite3.connect(DB_PATH)
+    cursor = conn.cursor()
+    cursor.execute("INSERT INTO videos (id, filename, filepath, upload_date) VALUES (?, ?, ?, ?)",
+                   (video_id, file.filename, filepath, datetime.now().strftime("%Y-%m-%d %H:%M:%S")))
+    conn.commit()
+    conn.close()
+    return templates.TemplateResponse("upload.html", {"request": request, "video_id": video_id})
+
+@app.get("/search", response_class=HTMLResponse)
+async def search_page(request: Request):
+    return templates.TemplateResponse("search.html", {"request": request})
+
+@app.post("/search")
+async def search_video(request: Request, video_id: str = Form(...)):
+    conn = sqlite3.connect(DB_PATH)
+    cursor = conn.cursor()
+    cursor.execute("SELECT id, filepath FROM videos WHERE id = ? AND is_active = 1", (video_id.strip(),))
+    video = cursor.fetchone()
+    conn.close()
+    if not video:
+        return templates.TemplateResponse("search.html", {"request": request, "error": "المقطع غير موجود أو انتهت صلاحيته."})
+    return templates.TemplateResponse("search.html", {"request": request, "video_id": video[0], "video_path": f"/stream/{video[0]}"})
+
+@app.get("/stream/{video_id}")
+async def stream_video(video_id: str):
+    conn = sqlite3.connect(DB_PATH)
+    cursor = conn.cursor()
+    cursor.execute("SELECT filepath FROM videos WHERE id = ?", (video_id,))
+    video = cursor.fetchone()
+    conn.close()
+    if video and os.path.exists(video[0]):
+        return FileResponse(video[0], media_type="video/mp4")
+    raise HTTPException(status_code=404, detail="Video not found")
+
+@app.get("/dashboard", response_class=HTMLResponse)
+async def dashboard_page(request: Request):
+    clean_expired_videos()
+    conn = sqlite3.connect(DB_PATH)
+    cursor = conn.cursor()
+    cursor.execute("SELECT id, filename, upload_date, is_active FROM videos ORDER BY upload_date DESC")
+    videos = cursor.fetchall()
+    conn.close()
+    video_list = [{"id": v[0], "filename": v[1], "date": v[2], "active": v[3]} for v in videos]
+    return templates.TemplateResponse("dashboard.html", {"request": request, "videos": video_list})
+
+@app.post("/dashboard/delete/{video_id}")
+async def delete_video(video_id: str):
+    conn = sqlite3.connect(DB_PATH)
+    cursor = conn.cursor()
+    cursor.execute("SELECT filepath FROM videos WHERE id = ?", (video_id,))
+    video = cursor.fetchone()
+    if video:
+        if os.path.exists(video[0]):
+            os.remove(video[0])
+        cursor.execute("DELETE FROM videos WHERE id = ?", (video_id,))
+        conn.commit()
+    conn.close()
+    return RedirectResponse(url="/dashboard", status_code=status.HTTP_303_SEE_OTHER)
